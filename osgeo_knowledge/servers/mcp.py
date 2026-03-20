@@ -198,14 +198,16 @@ async def search_entities(
     if entity_type:
         sql = """
             SELECT
-                entity_name,
-                entity_type,
-                description,
-                aliases,
-                similarity(entity_name, %s) AS sim
-            FROM entities
-            WHERE entity_type = %s
-              AND (entity_name %% %s OR entity_name ILIKE %s)
+                e.entity_name,
+                e.entity_type,
+                e.url,
+                e.confidence,
+                similarity(e.entity_name, %s) AS sim,
+                p.title AS source_page
+            FROM entities e
+            LEFT JOIN pages p ON e.source_page_id = p.id
+            WHERE e.entity_type = %s
+              AND (e.entity_name %% %s OR e.entity_name ILIKE %s)
             ORDER BY sim DESC
             LIMIT %s
         """
@@ -214,13 +216,15 @@ async def search_entities(
     else:
         sql = """
             SELECT
-                entity_name,
-                entity_type,
-                description,
-                aliases,
-                similarity(entity_name, %s) AS sim
-            FROM entities
-            WHERE entity_name %% %s OR entity_name ILIKE %s
+                e.entity_name,
+                e.entity_type,
+                e.url,
+                e.confidence,
+                similarity(e.entity_name, %s) AS sim,
+                p.title AS source_page
+            FROM entities e
+            LEFT JOIN pages p ON e.source_page_id = p.id
+            WHERE e.entity_name %% %s OR e.entity_name ILIKE %s
             ORDER BY sim DESC
             LIMIT %s
         """
@@ -238,13 +242,12 @@ async def search_entities(
 
     lines = [f"Found {len(results)} entities matching: {query}\n"]
     for i, r in enumerate(results, 1):
-        desc = r["description"] or "No description"
-        aliases_list = r.get("aliases") or []
-        aliases_str = f"  Aliases: {', '.join(aliases_list)}" if aliases_list else ""
+        url_str = f"\n  URL: {r['url']}" if r.get("url") else ""
+        source_str = f"\n  Source: {r['source_page']}" if r.get("source_page") else ""
         lines.append(
             f"[{i}] {r['entity_name']} ({r['entity_type']})\n"
-            f"  Similarity: {r['sim']:.2f}\n"
-            f"  Description: {desc[:300]}" + (f"\n{aliases_str}" if aliases_str else "")
+            f"  Similarity: {r['sim']:.2f}"
+            f"{url_str}{source_str}"
         )
 
     return "\n\n".join(lines)
