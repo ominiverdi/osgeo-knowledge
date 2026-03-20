@@ -45,30 +45,55 @@ from osgeo_knowledge.db import fetch_all, fetch_one
 mcp = FastMCP("osgeo-knowledge")
 
 
+# -- Source filter helper ------------------------------------------------------
+
+# URL-based source classification
+SOURCE_FILTERS = {
+    "wiki": "pe.url LIKE 'https://wiki.osgeo.org/%%'",
+    "planet": "pe.url NOT LIKE 'https://wiki.osgeo.org/%%' AND pe.url NOT LIKE 'https://%%osgeo.org/%%'",
+    "wordpress": "(pe.url LIKE 'https://www.osgeo.org/%%' OR pe.url LIKE 'https://osgeo.org/%%')",
+}
+
+# Same filters but for pages table (p.url instead of pe.url)
+SOURCE_FILTERS_PAGES = {
+    "wiki": "p.url LIKE 'https://wiki.osgeo.org/%%'",
+    "planet": "p.url NOT LIKE 'https://wiki.osgeo.org/%%' AND p.url NOT LIKE 'https://%%osgeo.org/%%'",
+    "wordpress": "(p.url LIKE 'https://www.osgeo.org/%%' OR p.url LIKE 'https://osgeo.org/%%')",
+}
+
+
+def _source_clause(source: Optional[str], table_prefix: str = "pe") -> str:
+    """Return a SQL AND clause for source filtering, or empty string."""
+    filters = SOURCE_FILTERS if table_prefix == "pe" else SOURCE_FILTERS_PAGES
+    if source and source in filters:
+        return f" AND {filters[source]}"
+    return ""
+
+
 # -- Tool: search_wiki --------------------------------------------------------
 
 
 @mcp.tool()
-async def search_wiki(query: str, limit: int = 5) -> str:
-    """Search the OSGeo wiki knowledge base using LLM-enhanced summaries and keywords.
+async def search_wiki(
+    query: str,
+    source: Optional[str] = None,
+    limit: int = 5,
+) -> str:
+    """Search the OSGeo knowledge base using LLM-enhanced summaries and keywords.
 
     This is the primary search tool. It searches over AI-generated page summaries
     and keywords for high-relevance results about OSGeo projects, people, events,
     and governance.
 
-    Good for questions like:
-    - "What is QGIS?"
-    - "FOSS4G conference locations"
-    - "OSGeo board governance"
-    - "How to contribute to GDAL"
-
     Args:
         query: Search query text (natural language or keywords)
+        source: Filter by content source: 'wiki', 'planet', 'wordpress' (default: all)
         limit: Maximum results to return (1-20, default 5)
     """
     limit = min(max(1, limit), 20)
+    source_filter = _source_clause(source, "pe")
 
-    sql = """
+    sql = f"""
         SELECT
             pe.page_title,
             pe.url,
@@ -82,9 +107,10 @@ async def search_wiki(query: str, limit: int = 5) -> str:
             ) AS rank
         FROM page_extensions pe
         WHERE
-            pe.resume_tsv @@ websearch_to_tsquery('english', %s)
+            (pe.resume_tsv @@ websearch_to_tsquery('english', %s)
             OR pe.keywords_tsv @@ websearch_to_tsquery('english', %s)
-            OR pe.page_title_tsv @@ websearch_to_tsquery('english', %s)
+            OR pe.page_title_tsv @@ websearch_to_tsquery('english', %s))
+            {source_filter}
         ORDER BY rank DESC
         LIMIT %s
     """
@@ -119,20 +145,26 @@ async def search_wiki(query: str, limit: int = 5) -> str:
 
 
 @mcp.tool()
-async def search_content(query: str, limit: int = 5) -> str:
-    """Search the raw wiki page content for detailed information.
+async def search_content(
+    query: str,
+    source: Optional[str] = None,
+    limit: int = 5,
+) -> str:
+    """Search the raw page content for detailed information.
 
     Use this when search_wiki doesn't find enough detail, or when you need
-    the actual wiki text rather than summaries. Searches over page content
-    chunks with full-text matching and highlights.
+    the actual text rather than summaries. Searches over content chunks
+    with full-text matching and highlights.
 
     Args:
         query: Search query text
+        source: Filter by content source: 'wiki', 'planet', 'wordpress' (default: all)
         limit: Maximum results to return (1-20, default 5)
     """
     limit = min(max(1, limit), 20)
+    source_filter = _source_clause(source, "p")
 
-    sql = """
+    sql = f"""
         SELECT
             p.title,
             p.url,
@@ -149,8 +181,9 @@ async def search_content(query: str, limit: int = 5) -> str:
         FROM page_chunks pc
         JOIN pages p ON pc.page_id = p.id
         WHERE
-            pc.tsv @@ websearch_to_tsquery('english', %s)
-            OR to_tsvector('english', p.title) @@ websearch_to_tsquery('english', %s)
+            (pc.tsv @@ websearch_to_tsquery('english', %s)
+            OR to_tsvector('english', p.title) @@ websearch_to_tsquery('english', %s))
+            {source_filter}
         ORDER BY rank DESC
         LIMIT %s
     """
