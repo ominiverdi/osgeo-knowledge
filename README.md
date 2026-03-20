@@ -96,7 +96,7 @@ For incremental updates and production deployment, see [docs/operations.md](docs
 ## Project Structure
 
 ```
-osgeo_wiki_bot/
+osgeo-knowledge/
 ├── analysis/        # Content analysis and search evaluation scripts
 ├── crawler/         # Wiki crawling components
 ├── db/              # Database population and test scripts
@@ -163,7 +163,7 @@ ORDER BY e.entity_name, r.predicate;
 
 ### Client Integration
 
-See [matrix-llmagent](https://github.com/osgeo/matrix-llmagent) for a reference implementation that uses this database as a knowledge backend for an AI chatbot.
+See [opencode-chat-bridge](https://github.com/nicepkg/opencode) for the chat bridge that uses this database as a knowledge backend for an AI chatbot via MCP.
 
 ## Analysis Tools
 

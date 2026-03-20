@@ -274,8 +274,8 @@ FROM page_chunks;
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/osgeo/osgeo_wiki_bot.git
-cd osgeo_wiki_bot
+git clone https://github.com/ominiverdi/osgeo-knowledge.git
+cd osgeo-knowledge
 
 # 2. Create virtual environment
 python3 -m venv venv
@@ -304,19 +304,19 @@ crontab -e
 # Add these lines:
 
 # Daily wiki sync at 2 AM
-0 2 * * * cd /path/to/osgeo_wiki_bot && /path/to/venv/bin/python3 crawler/wiki_sync.py >> logs/sync.log 2>&1
+0 2 * * * cd /path/to/osgeo-knowledge && /path/to/venv/bin/python3 crawler/wiki_sync.py >> logs/sync.log 2>&1
 
 # Process chunks after sync
-30 2 * * * cd /path/to/osgeo_wiki_bot && /path/to/venv/bin/python3 db/process_chunks.py --limit=100 >> logs/chunks.log 2>&1
+30 2 * * * cd /path/to/osgeo-knowledge && /path/to/venv/bin/python3 db/process_chunks.py --limit=100 >> logs/chunks.log 2>&1
 
 # Process extensions (staggered to avoid rate limits)
-0 3 * * * cd /path/to/osgeo_wiki_bot && /path/to/venv/bin/python3 db/process_extensions.py --limit=50 >> logs/extensions.log 2>&1
+0 3 * * * cd /path/to/osgeo-knowledge && /path/to/venv/bin/python3 db/process_extensions.py --limit=50 >> logs/extensions.log 2>&1
 
 # Weekly database maintenance on Sunday at 4 AM
 0 4 * * 0 psql -d osgeo_wiki -c "VACUUM ANALYZE;" >> logs/maintenance.log 2>&1
 
 # Monthly full crawl on 1st at 3 AM (catches deletions, missed changes)
-0 3 1 * * cd /path/to/osgeo_wiki_bot && /path/to/venv/bin/python3 crawler/crawler.py >> logs/full_crawl.log 2>&1
+0 3 1 * * cd /path/to/osgeo-knowledge && /path/to/venv/bin/python3 crawler/crawler.py >> logs/full_crawl.log 2>&1
 ```
 
 ### Log Files

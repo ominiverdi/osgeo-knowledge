@@ -1,0 +1,61 @@
+[project]
+name = "osgeo-knowledge"
+version = "0.1.0"
+description = "OSGeo wiki knowledge base with full-text search, entity extraction, and MCP server"
+readme = "README.md"
+license = {text = "GPL-3.0"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Lorenzo Becchi"}
+]
+keywords = ["osgeo", "wiki", "knowledge-base", "mcp", "search", "entities"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "psycopg2-binary>=2.9.9",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "ruff>=0.1.0",
+]
+mcp = [
+    "mcp[cli]>=1.2.0",
+]
+crawl = [
+    "requests>=2.31.0",
+    "httpx>=0.25.0",
+    "openai>=1.3.0",
+]
+
+[project.scripts]
+osgeo-knowledge = "osgeo_knowledge.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/ominiverdi/osgeo-knowledge"
+Repository = "https://github.com/ominiverdi/osgeo-knowledge"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["osgeo_knowledge*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
+ignore = ["E501"]
