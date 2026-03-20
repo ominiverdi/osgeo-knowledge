@@ -19,7 +19,7 @@ organizations, conferences) and 17000+ relationships between them.
 
 ## Example calls
 
-search_entities(query="strk", entity_type="person")
+search_entities(query="FrankW", entity_type="person")
 search_entities(query="FOSS4G 2024")
 get_entity_relationships(entity_name="OSGeo", predicate="president_of")
 get_entity_relationships(entity_name="FOSS4G", predicate="located_in")
@@ -28,7 +28,7 @@ get_entity_relationships(entity_name="FOSS4G", predicate="located_in")
 
 - Entity types: person, project, organization, conference, meeting,
   location, topic, sprint, software, year
-- Fuzzy matching: typos work ("strk" finds "Sandro Santilli")
+- Fuzzy matching: usernames and typos work ("FrankW" finds "Frank Warmerdam")
 - Common predicates: member_of, contributes_to, located_in, happened_in,
   president_of, created_by, founded_by, sponsors
 - Combine: search_entities to find someone, then get_entity_relationships
