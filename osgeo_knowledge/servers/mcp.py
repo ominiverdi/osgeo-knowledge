@@ -70,6 +70,26 @@ def _source_clause(source: Optional[str], table_prefix: str = "pe") -> str:
     return ""
 
 
+def _date_clause(
+    date_from: Optional[str],
+    date_to: Optional[str],
+    date_column: str,
+    params: list,
+) -> str:
+    """Return SQL AND clauses for date range filtering.
+
+    Appends date values to params list. Accepts YYYY-MM-DD format.
+    """
+    clause = ""
+    if date_from:
+        clause += f" AND {date_column} >= %s::date"
+        params.append(date_from)
+    if date_to:
+        clause += f" AND {date_column} <= (%s::date + interval '1 day')"
+        params.append(date_to)
+    return clause
+
+
 # -- Tool: search_wiki --------------------------------------------------------
 
 
@@ -77,6 +97,8 @@ def _source_clause(source: Optional[str], table_prefix: str = "pe") -> str:
 async def search_wiki(
     query: str,
     source: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
     limit: int = 5,
 ) -> str:
     """Search the OSGeo knowledge base using LLM-enhanced summaries and keywords.
@@ -88,10 +110,15 @@ async def search_wiki(
     Args:
         query: Search query text (natural language or keywords)
         source: Filter by content source: 'wiki', 'planet', 'wordpress' (default: all)
+        date_from: Start date filter, YYYY-MM-DD (e.g., '2025-12-01')
+        date_to: End date filter, YYYY-MM-DD (e.g., '2025-12-31')
         limit: Maximum results to return (1-20, default 5)
     """
     limit = min(max(1, limit), 20)
     source_filter = _source_clause(source, "pe")
+    params: list = [query, query, query, query, query, query]
+    date_filter = _date_clause(date_from, date_to, "pe.last_updated", params)
+    params.append(limit)
 
     sql = f"""
         SELECT
@@ -99,6 +126,7 @@ async def search_wiki(
             pe.url,
             pe.resume,
             pe.keywords,
+            pe.last_updated::date AS content_date,
             (
                 0.6 * ts_rank(pe.resume_tsv, websearch_to_tsquery('english', %s)) +
                 0.4 * ts_rank(pe.keywords_tsv, websearch_to_tsquery('english', %s)) +
@@ -111,29 +139,34 @@ async def search_wiki(
             OR pe.keywords_tsv @@ websearch_to_tsquery('english', %s)
             OR pe.page_title_tsv @@ websearch_to_tsquery('english', %s))
             {source_filter}
+            {date_filter}
         ORDER BY rank DESC
         LIMIT %s
     """
 
     try:
-        results = fetch_all(sql, (query, query, query, query, query, query, limit), limit=limit)
+        results = fetch_all(sql, tuple(params), limit=limit)
     except Exception as e:
         return f"Search error: {e}"
 
     if not results:
         return f"No results found for: {query}"
 
-    lines = [f"Found {len(results)} results for: {query}\n"]
+    date_info = ""
+    if date_from or date_to:
+        date_info = f" (date range: {date_from or '...'} to {date_to or '...'})"
+    lines = [f"Found {len(results)} results for: {query}{date_info}\n"]
     for i, r in enumerate(results, 1):
         title = r["page_title"]
         url = r["url"]
         summary = (r["resume"] or "")[:400]
         keywords = (r["keywords"] or "")[:200]
         score = r["rank"]
+        date_str = f"\n  Date: {r['content_date']}" if r.get("content_date") else ""
         lines.append(
             f"[{i}] {title}\n"
             f"  URL: {url}\n"
-            f"  Score: {score:.3f}\n"
+            f"  Score: {score:.3f}{date_str}\n"
             f"  Summary: {summary}\n"
             f"  Keywords: {keywords}"
         )
@@ -148,6 +181,8 @@ async def search_wiki(
 async def search_content(
     query: str,
     source: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
     limit: int = 5,
 ) -> str:
     """Search the raw page content for detailed information.
@@ -159,15 +194,21 @@ async def search_content(
     Args:
         query: Search query text
         source: Filter by content source: 'wiki', 'planet', 'wordpress' (default: all)
+        date_from: Start date filter, YYYY-MM-DD (e.g., '2025-12-01')
+        date_to: End date filter, YYYY-MM-DD (e.g., '2025-12-31')
         limit: Maximum results to return (1-20, default 5)
     """
     limit = min(max(1, limit), 20)
     source_filter = _source_clause(source, "p")
+    params: list = [query, query, query, query]
+    date_filter = _date_clause(date_from, date_to, "p.last_crawled", params)
+    params.append(limit)
 
     sql = f"""
         SELECT
             p.title,
             p.url,
+            p.last_crawled::date AS content_date,
             ts_headline(
                 'english', pc.chunk_text,
                 websearch_to_tsquery('english', %s),
@@ -184,12 +225,13 @@ async def search_content(
             (pc.tsv @@ websearch_to_tsquery('english', %s)
             OR to_tsvector('english', p.title) @@ websearch_to_tsquery('english', %s))
             {source_filter}
+            {date_filter}
         ORDER BY rank DESC
         LIMIT %s
     """
 
     try:
-        results = fetch_all(sql, (query, query, query, query, limit), limit=limit)
+        results = fetch_all(sql, tuple(params), limit=limit)
     except Exception as e:
         return f"Search error: {e}"
 
