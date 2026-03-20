@@ -15,10 +15,18 @@ geospatial community (GeoServer, QGIS, Mappery, GeoSolutions, gvSIG, etc.).
 - "What's new in the geospatial community"
 - Questions about specific blog posts or tutorials
 
+## Date filtering
+
+Both search tools support date_from and date_to (YYYY-MM-DD format)
+to narrow results to a time period. Use these for questions like
+"what happened in December?" or "latest news this month".
+
 ## Example calls
 
 search_wiki(query="QGIS", source="planet")
+search_wiki(query="GeoServer", source="planet", date_from="2025-12-01", date_to="2025-12-31")
 search_content(query="GeoServer WPS tutorial", source="planet")
+search_wiki(query="release", source="planet", date_from="2026-03-01")
 
 ## Notes
 
