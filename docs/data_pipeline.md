@@ -1,20 +1,23 @@
 # Data Pipeline
 
-This document describes the data import and update strategies for the OSGeo Wiki Database.
+This document describes the data import and update strategies for the OSGeo Knowledge Base.
 
 ## Content Sources
 
 ### 1. OSGeo Wiki (wiki.osgeo.org)
 - MediaWiki instance
 - Primary source for project documentation, governance, events
+- Implemented via `crawler/wiki_sync.py`
 
-### 2. OSGeo WordPress (osgeo.org)
-- Main website content
+### 2. Planet OSGeo (planet.osgeo.org)
+- Aggregates blog posts from 100+ OSGeo community members and projects
+- Community updates, event reports, project highlights
+- Implemented via `crawler/planet_sync.py`
+
+### 3. OSGeo Website (osgeo.org)
+- Main website content (WordPress)
 - News, announcements, organizational info
-
-### 3. OSGeo Blog (blog.osgeo.org)
-- Blog posts, community updates
-- Event reports, project highlights
+- Implemented via `crawler/wordpress_sync.py`
 
 ## Initial Import
 
@@ -31,11 +34,18 @@ This document describes the data import and update strategies for the OSGeo Wiki
 3. **Link** - Create relationships between entities
 4. **Store** - Populate entity and relationship tables
 
-### Phase 3: WordPress Content
-1. **Crawl** - Fetch posts and pages via WordPress REST API
-2. **Parse** - Extract content, author, date, categories
+### Phase 3: Planet OSGeo Content
+1. **Crawl** - Fetch posts from Planet OSGeo RSS/Atom feed
+2. **Parse** - Extract content, author, source blog, date
 3. **Chunk** - Split into searchable chunks
 4. **Merge** - Integrate with existing wiki entities where applicable
+5. **Store** - Insert into PostgreSQL
+
+### Phase 4: WordPress Content
+1. **Crawl** - Fetch pages and posts via WordPress REST API (osgeo.org)
+2. **Parse** - Extract content, author, date, categories
+3. **Chunk** - Split into searchable chunks
+4. **Merge** - Integrate with existing entities where applicable
 5. **Store** - Insert into PostgreSQL
 
 ## Continuous Update Strategy
@@ -144,6 +154,22 @@ def sync_changes(since_timestamp):
 [Store new revid + Log Change]
 ```
 
+### Processing Queue
+
+After crawling, updated pages are enqueued for asynchronous processing via
+the `queue_task()` database function. Each source page can generate multiple
+task types:
+
+| Task Type | Processor | Description |
+|-----------|-----------|-------------|
+| `chunks` | `db/process_chunks.py` | Split content into searchable chunks, generate tsvectors |
+| `extensions` | `db/process_extensions.py` | Extract structured metadata and extensions |
+| `entities` | `db/process_entities.py` | Extract named entities and relationships |
+
+Processors call `claim_task('<type>')` to atomically claim the next pending
+task, preventing duplicate processing in concurrent environments. Each
+processor runs independently and can be scheduled or triggered separately.
+
 ### Chunk Update Strategy
 
 When a page is modified:
@@ -171,7 +197,7 @@ When entities change:
 CREATE TABLE public.source_pages (
     id integer NOT NULL,
     source_type text NOT NULL,
-      -- 'wiki', 'wordpress_page', 'wordpress_post'
+      -- 'wiki', 'planet', 'wordpress_page', 'wordpress_post'
     source_id integer NOT NULL,
        -- pageid from MediaWiki, post ID from WordPress
     title text NOT NULL,
@@ -193,7 +219,7 @@ CREATE TABLE public.source_pages (
 CREATE TABLE public.sync_log (
     id integer NOT NULL,
     sync_type text NOT NULL,   -- 'incremental', 'full'
-    source_type text NOT NULL, -- 'wiki', 'wordpress'
+    source_type text NOT NULL, -- 'wiki', 'planet', 'wordpress'
     started_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     completed_at timestamp without time zone,
     since_timestamp timestamp without time zone,
@@ -222,7 +248,8 @@ CREATE INDEX idx_sync_log_started ON sync_log(started_at);
 | Task | Frequency | Description |
 |------|-----------|-------------|
 | Wiki incremental sync | Daily | Check recentchanges API |
-| WordPress sync | Daily | Fetch new/updated posts |
+| Planet OSGeo sync | Every 4 hours | Fetch new posts from RSS/Atom feed |
+| WordPress sync | Daily | Fetch new/updated pages and posts |
 | Full wiki crawl | Monthly | Catch any missed changes, detect deletions |
 | Entity re-extraction | Weekly | Refresh entity relationships |
 | Database maintenance | Weekly | VACUUM, reindex |
@@ -233,11 +260,17 @@ CREATE INDEX idx_sync_log_started ON sync_log(started_at);
 # Daily wiki sync at 2 AM
 0 2 * * * cd /path/to/project && python crawler/wiki_sync.py
 
-# Monthly full crawl on 1st at 3 AM
-0 3 1 * * cd /path/to/project && python crawler/crawler.py --full
+# Planet OSGeo sync every 4 hours
+0 */4 * * * cd /path/to/project && python crawler/planet_sync.py
 
-# Weekly maintenance on Sunday at 4 AM
-0 4 * * 0 psql -d osgeo_wiki -c "VACUUM ANALYZE;"
+# WordPress (osgeo.org) sync daily at 3 AM
+0 3 * * * cd /path/to/project && python crawler/wordpress_sync.py
+
+# Monthly full crawl on 1st at 4 AM
+0 4 1 * * cd /path/to/project && python crawler/crawler.py --full
+
+# Weekly maintenance on Sunday at 5 AM
+0 5 * * 0 psql -d osgeo_wiki -c "VACUUM ANALYZE;"
 ```
 
 ## Error Handling
@@ -257,6 +290,14 @@ https://www.osgeo.org/wp-json/wp/v2/posts?modified_after=2025-12-10T00:00:00Z
 ```
 
 Track by post ID and `modified` timestamp instead of revid.
+
+## Pipeline Consumer
+
+The MCP server (`osgeo_knowledge.servers.mcp`) is the primary consumer of
+this pipeline. It queries the processed chunks, entities, and metadata to
+serve search results and knowledge graph lookups to connected clients
+(e.g., Claude Desktop, IDE integrations). See `docs/integration.md` for
+configuration details.
 
 ## Future Considerations
 

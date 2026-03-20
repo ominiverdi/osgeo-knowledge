@@ -142,6 +142,8 @@ CREATE INDEX idx_connections_target ON entity_connections_2hop(target_name);
 
 ## Option 2: Apache AGE (Graph Extension for PostgreSQL)
 
+**Status**: Considered but not adopted. Kept here as a future option if recursive CTEs become insufficient.
+
 **Effort**: Medium | **Infrastructure**: PostgreSQL extension
 
 ### Description
@@ -279,25 +281,11 @@ SELECT * FROM cypher('osgeo_graph', $$
 $$) as (relationship agtype, count agtype);
 ```
 
-#### Integration with Matrix Agent
+#### Integration with MCP Server (hypothetical)
 
-```python
-# In matrix-llmagent knowledge base tool
-async def graph_query(self, cypher: str) -> list[dict]:
-    """Execute Cypher query via Apache AGE."""
-    async with self.pool.acquire() as conn:
-        await conn.execute("LOAD 'age';")
-        await conn.execute("SET search_path = ag_catalog, public;")
-        
-        # Wrap Cypher in AGE function
-        sql = f"""
-            SELECT * FROM cypher('osgeo_graph', $$
-                {cypher}
-            $$) as (result agtype)
-        """
-        rows = await conn.fetch(sql)
-        return [dict(r) for r in rows]
-```
+If AGE were adopted, the MCP server (`osgeo_knowledge/servers/mcp.py`) would
+need a Cypher query wrapper alongside the existing `search_entities` and
+`get_entity_relationships` tools. This was not implemented.
 
 ### Pros
 - Single database (PostgreSQL)
@@ -320,6 +308,8 @@ async def graph_query(self, cypher: str) -> list[dict]:
 ---
 
 ## Option 3: Neo4j (Dedicated Graph Database)
+
+**Status**: Considered but not adopted. Kept here as a future option if graph analytics or visualization become requirements.
 
 **Effort**: High | **Infrastructure**: Separate Neo4j instance
 
@@ -452,41 +442,11 @@ RETURN f.name, type(r), related.name
 ORDER BY f.name
 ```
 
-#### Integration with Matrix Agent
+#### Integration with MCP Server (hypothetical)
 
-```python
-# matrix_llmagent/tools/neo4j_search.py
-from neo4j import AsyncGraphDatabase
-
-class Neo4jSearchExecutor:
-    def __init__(self, uri: str, auth: tuple):
-        self.driver = AsyncGraphDatabase.driver(uri, auth=auth)
-    
-    async def execute(self, query: str, entity: str = None) -> str:
-        """Execute a graph search query."""
-        async with self.driver.session() as session:
-            # Pattern-based query selection
-            if "path" in query.lower() or "connected" in query.lower():
-                result = await self._find_paths(session, entity)
-            elif "who" in query.lower():
-                result = await self._find_people(session, query)
-            else:
-                result = await self._general_search(session, entity)
-            
-            return self._format_results(result)
-    
-    async def _find_paths(self, session, entity: str):
-        result = await session.run(
-            """
-            MATCH path = (a {name: $entity})-[*1..3]-(b)
-            RETURN DISTINCT b.name as connected, length(path) as distance
-            ORDER BY distance
-            LIMIT 20
-            """,
-            entity=entity
-        )
-        return await result.data()
-```
+If Neo4j were adopted, the MCP server (`osgeo_knowledge/servers/mcp.py`) would
+need Neo4j query tools alongside or replacing the existing `search_entities` and
+`get_entity_relationships` tools. This was not implemented.
 
 ### Pros
 - Best-in-class graph database
@@ -663,6 +623,12 @@ SELECT ?project ?projectName ?wikidataLink WHERE {
 
 For the OSGeo Wiki Database project, we recommend a phased approach:
 
+> **Current implementation**: PostgreSQL-based entity storage with pg_trgm for
+> fuzzy matching and standard JOINs for relationship traversal. The MCP server's
+> `get_entity_relationships` tool provides the query interface. See
+> `osgeo_knowledge/servers/mcp.py` for the `search_entities` and
+> `get_entity_relationships` tool definitions.
+
 ### Phase 1: Enhanced PostgreSQL (Now)
 - Add recursive queries for multi-hop traversal
 - Create materialized views for common patterns
@@ -696,11 +662,11 @@ For the OSGeo Wiki Database project, we recommend a phased approach:
 ### Phase 2 Tasks
 - [ ] Install Apache AGE extension
 - [ ] Create sync script from entities to graph
-- [ ] Add Cypher query wrapper for Matrix agent
+- [ ] Add Cypher query wrapper to MCP server (`osgeo_knowledge/servers/mcp.py`)
 - [ ] Benchmark against recursive CTEs
 
 ### Phase 3 Tasks
 - [ ] Set up Neo4j instance (Docker)
 - [ ] Create full sync pipeline
-- [ ] Add Neo4j executor to Matrix agent
+- [ ] Add Neo4j query tool to MCP server (`osgeo_knowledge/servers/mcp.py`)
 - [ ] Set up Neo4j Browser for visualization

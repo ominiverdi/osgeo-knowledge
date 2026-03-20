@@ -33,7 +33,7 @@ python crawler/crawler.py
 
 ## WordPress Crawler
 
-**Status**: Planned
+**Status**: Implemented (`crawler/wordpress_sync.py`)
 
 ### Target Sites
 
@@ -53,50 +53,56 @@ Use WordPress REST API:
 - Category/tag mapping
 - Featured image references
 
-## Common Features (Planned)
+## Planet OSGeo Crawler
 
-### Rate Limiting
+**Status: Implemented** (`crawler/planet_sync.py`)
 
-- Configurable delay between requests
+Syncs blog posts from Planet OSGeo (planet.osgeo.org) RSS feeds into the knowledge base.
+
+### Features
+- Fetches posts from multiple blog feeds aggregated by Planet OSGeo
+- Creates source_pages entries with source_type='planet_post'
+- Prunes old posts (configurable retention)
+- Queues new posts for chunk processing and LLM extension generation
+
+### Usage
+```bash
+# Sync all feeds
+python crawler/planet_sync.py --all
+
+# Via cron (every 4 hours)
+30 */4 * * * cd $WIKI_BOT && $PYTHON crawler/planet_sync.py --all >> logs/planet_sync.log 2>&1
+```
+
+### Sources
+Posts come from blogs including: geoserver.org, blog.qgis.org, mappery.org, camptocamp.com, blog.gvsig.org, anitagraser.com, merginmaps.com, and others.
+
+## Common Features
+
+### Implemented
+
+- Direct DB writes to `source_pages` table (all crawlers)
+- Processing queue integration via `processing_queue` table
+- Rate limiting with configurable delay between requests
+- Crawl progress logging and error tracking
+
+### Planned
+
 - Respect robots.txt
 - Back-off on errors
-
-### Caching
-
-- Store raw responses for debugging
 - Skip unchanged content (ETag/Last-Modified)
-
-### Logging
-
-- Track crawl progress
-- Record errors and retries
 - Generate crawl reports
 
 ## Output Format
 
-Crawlers output to `wiki_dump/` with structure:
+Crawlers write directly to the database:
 
-```
-wiki_dump/
-├── wiki/
-│   ├── Page_Name.json
-│   └── ...
-├── wordpress_pages/
-│   └── ...
-└── wordpress_posts/
-    └── ...
-```
+- **`source_pages`** -- one row per crawled page/post, with columns for title, URL, content, source_type, and metadata.
+- **`processing_queue`** -- new or updated pages are queued here for chunk processing and LLM extension generation.
 
-Each JSON file contains:
-```json
-{
-  "title": "Page Title",
-  "url": "https://...",
-  "content": "...",
-  "metadata": {
-    "last_modified": "...",
-    "categories": [],
-    "author": "..."
-  }
-}
-```
+Source types used:
+| Crawler | `source_type` |
+|---------|---------------|
+| Wiki | `wiki_page` |
+| WordPress | `wp_post`, `wp_page` |
+| Planet OSGeo | `planet_post` |

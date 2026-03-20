@@ -280,7 +280,7 @@ cd osgeo-knowledge
 # 2. Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -e ".[mcp,crawl]"
 
 # 3. Configure environment
 cp .env.template .env
@@ -303,6 +303,9 @@ crontab -e
 
 # Add these lines:
 
+# Planet OSGeo sync every 4 hours
+30 */4 * * * cd /path/to/osgeo-knowledge && /path/to/venv/bin/python3 crawler/planet_sync.py --all >> logs/planet_sync.log 2>&1
+
 # Daily wiki sync at 2 AM
 0 2 * * * cd /path/to/osgeo-knowledge && /path/to/venv/bin/python3 crawler/wiki_sync.py >> logs/sync.log 2>&1
 
@@ -317,6 +320,30 @@ crontab -e
 
 # Monthly full crawl on 1st at 3 AM (catches deletions, missed changes)
 0 3 1 * * cd /path/to/osgeo-knowledge && /path/to/venv/bin/python3 crawler/crawler.py >> logs/full_crawl.log 2>&1
+```
+
+### MCP Server
+
+The MCP server runs as a subprocess managed by the chat bridge (opencode-chat-bridge).
+It starts automatically per session -- no manual management needed.
+
+To test the MCP server standalone:
+```bash
+python -m osgeo_knowledge.servers.mcp
+```
+
+The bot's opencode.json points to the venv python:
+```json
+{
+  "osgeo-knowledge": {
+    "type": "local",
+    "command": [
+      "/path/to/osgeo-knowledge/venv/bin/python",
+      "-m",
+      "osgeo_knowledge.servers.mcp"
+    ]
+  }
+}
 ```
 
 ### Log Files

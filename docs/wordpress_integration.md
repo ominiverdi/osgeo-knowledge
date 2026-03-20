@@ -10,7 +10,7 @@ This document describes the OSGeo WordPress site structure and integration appro
 
 ## Content Types
 
-### Pages (~97 published)
+### Pages (~89 published)
 - Standard WordPress pages
 - REST API provides metadata (id, title, link, modified)
 - **Content scraped from HTML** (REST API content field misses dynamic content)
@@ -72,12 +72,13 @@ python3 crawler/wordpress_sync.py --full -v
 - Processing tasks queued for chunks and extensions
 - ~8 pages have no `<main>` tag (archive templates) and are skipped
 
-### News Sync (Not Yet Implemented)
+### News Sync (Partial -- RSS Only)
 
-Options for syncing news articles:
+WordPress page sync IS implemented via `crawler/wordpress_sync.py` (see above).
+News articles are not yet fully synced. Current options:
 
-1. **RSS Feed**: Limited to 10 most recent items
-2. **HTML Scraping**: Full archive access, requires parsing
+1. **RSS Feed**: Limited to 10 most recent items (can be consumed now)
+2. **HTML Scraping**: Full archive access, requires parsing (not yet implemented)
 3. **REST API**: Pending webmaster enabling `show_in_rest` for news post type
 
 ## Data Flow
@@ -142,6 +143,7 @@ GROUP BY task_type, status;
 ## Next Steps
 
 - [x] Implement WordPress page sync with HTML scraping
+- [x] WordPress content accessible via MCP with `source='wordpress'` filter (e.g. `search_wiki(query="sponsorship", source="wordpress")`)
 - [ ] Add news sync when REST API access is enabled
-- [ ] Process extensions for WordPress pages (LLM summaries)
+- [x] Process extensions for WordPress pages (LLM summaries -- handled by `process_extensions.py` for all sources)
 - [ ] Test search with combined wiki + WordPress content

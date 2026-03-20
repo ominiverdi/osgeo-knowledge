@@ -1,209 +1,185 @@
-# OSGeo Wiki Database
+# OSGeo Knowledge Base
 
-A PostgreSQL database for OSGeo wiki content, designed to power AI assistants and search interfaces with full-text search, entity extraction, and relationship queries.
+A PostgreSQL knowledge base of the OSGeo ecosystem, with an MCP server for AI assistant integration. Aggregates content from the OSGeo wiki, Planet OSGeo blog feeds, and the osgeo.org website.
 
-## Project Overview
+## What it does
 
-This project crawls the OSGeo wiki, processes content into searchable chunks, extracts entities and relationships, and stores everything in a PostgreSQL database. It serves as the knowledge backend for AI agents that answer questions about OSGeo projects, people, events, and governance.
+This project crawls OSGeo content sources, processes text into searchable chunks, extracts entities and relationships, generates LLM-enhanced summaries, and exposes everything through a [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server.
 
-**Primary use case**: Powering chatbots and AI assistants (e.g., Matrix bots) that need to answer questions like:
-- "What is QGIS?" (full-text search on summaries)
-- "Who is strk?" (entity lookup with fuzzy matching)
-- "Who is president of OSGeo?" (relationship query by predicate)
-- "List all FOSS4G conferences with their locations" (batch entity info with prefix matching)
+**Data sources:**
 
-## Architecture
+| Source | Content | Pages |
+|--------|---------|-------|
+| OSGeo Wiki | Projects, governance, board meetings, local chapters, community guidelines | 5300+ |
+| Planet OSGeo | Aggregated blog posts from GeoServer, QGIS, Mappery, gvSIG, etc. | 50+ |
+| osgeo.org | Official website pages, sponsorship info, project descriptions | 89 |
 
-### Components
+**Use cases:**
 
-- **Crawler**: Extracts content from wiki.osgeo.org
-- **Database**: PostgreSQL with full-text search capabilities
-- **Entity Extraction**: Identifies and indexes people, projects, and organizations
-- **Analysis Tools**: Scripts for evaluating search quality and content metrics
+- Power chatbots that answer questions about OSGeo ("What is QGIS?", "Who is the president of OSGeo?")
+- Search across wiki content, blog posts, and website pages with source and date filtering
+- Query a knowledge graph of 20,000+ entities and 17,000+ relationships
 
-### Data Flow
+## MCP Server
 
-1. **Crawling**: Python crawler extracts content from OSGeo wiki
-2. **Processing**: Content analyzed and divided into chunks
-3. **Entity Extraction**: Named entities identified and linked
-4. **Storage**: Data indexed in PostgreSQL with full-text search vectors
-5. **Integration**: External clients query the database directly
+The primary interface is an MCP server with 6 tools:
 
-## Key Features
+| Tool | Description |
+|------|-------------|
+| `search_wiki` | Search LLM-generated summaries and keywords (primary search) |
+| `search_content` | Full-text search over raw page content with highlights |
+| `search_entities` | Fuzzy entity search (people, projects, orgs, conferences) |
+| `get_entity_relationships` | Knowledge graph queries (subject-predicate-object triples) |
+| `get_page` | Retrieve full wiki page content by title |
+| `get_wiki_stats` | Database statistics and sync status |
 
-- **Full-Text Search**: PostgreSQL tsvector indexing on content, summaries, and keywords
-- **LLM-Enhanced Summaries**: AI-generated page summaries and keywords for better search relevance
-- **Entity Extraction**: People, projects, organizations, events, and years
-- **Entity Relationships**: Subject-predicate-object triples (e.g., "FOSS4G 2023" -> "located_in" -> "Kosovo")
-- **Fuzzy Matching**: Trigram similarity for typo-tolerant entity search
-- **Incremental Sync**: Track wiki changes via MediaWiki API to keep data fresh
+Both search tools support filtering by `source` (`wiki`, `planet`, `wordpress`) and date range (`date_from`, `date_to` in YYYY-MM-DD format).
 
-## Database Schema
+### Running the MCP server
 
-### Core Tables
+```bash
+# Install with MCP dependencies
+pip install -e ".[mcp]"
 
-- `pages` - Page content and metadata
-- `page_chunks` - Searchable content chunks with tsvector indexes
-- `page_categories` - Category assignments
-- `code_snippets` - Extracted code blocks
+# Run via module
+python -m osgeo_knowledge.servers.mcp
 
-### Entity Tables
+# Or via CLI
+osgeo-knowledge mcp
+```
 
-- `entities` - Extracted named entities (people, projects, organizations, events)
-- `entity_relationships` - Subject-predicate-object triples linking entities
+### MCP client configuration
 
-### Extension Tables
+Add to your `opencode.json`, Claude Desktop config, or any MCP-compatible client:
 
-- `page_extensions` - LLM-generated summaries and keywords for improved search
-- `source_pages` - Sync tracking for incremental updates (see `schema/sync_tracking.sql`)
+```json
+{
+  "osgeo-knowledge": {
+    "type": "local",
+    "command": [
+      "/path/to/venv/bin/python",
+      "-m",
+      "osgeo_knowledge.servers.mcp"
+    ]
+  }
+}
+```
 
-## Setup and Usage
+## Skills
+
+The `skills/` directory contains bot integration skills -- structured instructions that tell AI models how and when to use each tool:
+
+| Skill | Purpose |
+|-------|---------|
+| `skills/wiki/` | OSGeo wiki search with `source="wiki"` |
+| `skills/planet/` | Planet OSGeo blog posts with `source="planet"` |
+| `skills/entities/` | People, projects, orgs, and relationships |
+| `skills/wordpress/` | osgeo.org website pages with `source="wordpress"` |
+
+The `AGENTS.md` file at the project root indexes all skills for bot deployment. See [docs/integration.md](docs/integration.md) for details.
+
+## Setup
 
 ### Prerequisites
 
-- Python 3.9+
-- PostgreSQL 12+ with pg_trgm extension
+- Python 3.10+
+- PostgreSQL 12+ with `pg_trgm` extension
 
 ### Quick Start
 
 ```bash
-# Setup environment
+# Clone and install
+git clone https://github.com/ominiverdi/osgeo-knowledge.git
+cd osgeo-knowledge
 python -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -e ".[mcp,crawl]"
 
 # Configure database connection
 cp .env.template .env
 # Edit .env with your PostgreSQL credentials
 
 # Initialize database schema
-psql -f schema/tables.sql
-psql -f schema/triggers.sql
-psql -f schema/extension.sql
+psql -d your_db -f schema/tables.sql
+psql -d your_db -f schema/triggers.sql
+psql -d your_db -f schema/extension.sql
+psql -d your_db -f schema/sync_tracking.sql
 
-# Crawl wiki content
-python crawler/crawler.py
+# Sync content from all sources
+python crawler/wiki_sync.py --days 30
+python crawler/planet_sync.py --all
+python crawler/wordpress_sync.py --days 30
 
-# Populate database
-python db/populate_wiki_db.py
-
-# Extract entities
-python db/populate_entities.py
+# Process content
+python db/process_chunks.py --limit 500
+python db/process_extensions.py --limit 100
 ```
 
-For incremental updates and production deployment, see [docs/operations.md](docs/operations.md).
+For production deployment and cron setup, see [docs/operations.md](docs/operations.md).
 
-## Project Structure
+## Architecture
+
+### Data Flow
+
+1. **Crawling** -- Three crawlers fetch content from wiki, Planet OSGeo, and osgeo.org
+2. **Queue** -- New/updated pages enter the processing queue
+3. **Chunking** -- Content split into searchable chunks with tsvector indexes
+4. **Extensions** -- LLM generates summaries and keywords for each page
+5. **Entities** -- Named entity extraction and relationship linking
+6. **MCP Server** -- Tools expose search, entity lookup, and page retrieval
+
+### Components
 
 ```
 osgeo-knowledge/
-├── analysis/        # Content analysis and search evaluation scripts
-├── crawler/         # Wiki crawling components
-├── db/              # Database population and test scripts
-├── docs/            # Documentation and roadmap
-├── modelfiles/      # Ollama model configurations
-├── schema/          # PostgreSQL schema definitions
-├── tests/           # Query and search tests
-└── wiki_dump/       # Raw crawled content (gitignored)
+  osgeo_knowledge/       Python package
+    servers/mcp.py       MCP server (6 tools)
+    db.py                Database connection helpers
+    cli.py               CLI entry point
+  crawler/               Content crawlers (wiki, planet, wordpress)
+  db/                    Processing scripts (chunks, extensions, entities)
+  schema/                PostgreSQL schema definitions
+  skills/                Bot integration skills (wiki, planet, entities, wordpress)
+  docs/                  Documentation
+  analysis/              Search quality evaluation scripts
+  tests/                 Query and search tests
+  AGENTS.md              Bot deployment config (skill index)
+  pyproject.toml         Package definition with mcp, dev, crawl extras
 ```
 
-## Integration
+## Database Schema
 
-External clients query the database using standard PostgreSQL connections. The schema supports three main query patterns:
+### Core Tables
 
-### 1. Full-Text Search (page content and summaries)
+- `pages` -- Page content and metadata
+- `page_chunks` -- Searchable content chunks with tsvector indexes
+- `page_categories` -- Category assignments
+- `page_extensions` -- LLM-generated summaries and keywords
 
-```sql
--- Search LLM-generated summaries and keywords
-SELECT page_title, url, resume
-FROM page_extensions
-WHERE resume_tsv @@ websearch_to_tsquery('english', 'QGIS geographic information')
-   OR keywords_tsv @@ websearch_to_tsquery('english', 'QGIS geographic information')
-ORDER BY ts_rank(resume_tsv, websearch_to_tsquery('english', 'QGIS')) DESC
-LIMIT 5;
-```
+### Entity Tables
 
-### 2. Entity Search (fuzzy matching)
+- `entities` -- Named entities (person, project, organization, conference, location, etc.)
+- `entity_relationships` -- Subject-predicate-object triples
 
-```sql
--- Find entities by name with trigram similarity
-SELECT entity_name, entity_type, url
-FROM entities
-WHERE entity_name % 'strk'  -- trigram similarity
-   OR entity_name ILIKE '%strk%'
-ORDER BY similarity(entity_name, 'strk') DESC
-LIMIT 10;
-```
+### Sync Tables
 
-### 3. Relationship Queries
+- `source_pages` -- Tracks synced content per source type (wiki, planet_post, wordpress_page)
+- `processing_queue` -- Task queue for chunk/extension/entity processing
+- `sync_log` -- Sync run history
 
-```sql
--- Find relationships by predicate (e.g., conference locations)
-SELECT s.entity_name AS subject, r.predicate, o.entity_name AS object
-FROM entity_relationships r
-JOIN entities s ON r.subject_id = s.id
-JOIN entities o ON r.object_id = o.id
-WHERE r.predicate = 'located_in'
-  AND s.entity_name LIKE 'FOSS4G%'
-ORDER BY s.entity_name;
-```
+See [docs/schema.md](docs/schema.md) for full schema documentation.
 
-### 4. Batch Entity Info (prefix matching)
+## Documentation
 
-```sql
--- Get all FOSS4G conferences with their locations and years
-SELECT e.entity_name, e.entity_type, r.predicate, o.entity_name AS related_to
-FROM entities e
-JOIN entity_relationships r ON e.id = r.subject_id
-JOIN entities o ON r.object_id = o.id
-WHERE e.entity_name LIKE 'FOSS4G%'
-  AND r.predicate IN ('located_in', 'happened_in')
-ORDER BY e.entity_name, r.predicate;
-```
-
-### Client Integration
-
-See [opencode-chat-bridge](https://github.com/nicepkg/opencode) for the chat bridge that uses this database as a knowledge backend for an AI chatbot via MCP.
-
-## Analysis Tools
-
-The `analysis/` directory contains scripts for:
-
-- Search quality evaluation
-- Content metrics and statistics
-- Chunking strategy comparison
-- Entity distribution analysis
-
-## TODO
-
-### Content Sources
-- [ ] Crawl OSGeo Wiki (wiki.osgeo.org) - current
-- [ ] Crawl OSGeo WordPress instances (osgeo.org, blog.osgeo.org)
-- [x] Incremental updates (detect and fetch only changed content via MediaWiki API)
-
-### Data Processing
-- [ ] Update content chunks when source pages change
-- [ ] Regenerate semantic embeddings for modified chunks
-- [ ] Update entity relationships on content changes
-
-### Entity Management
-- [ ] Improve entity extraction pipeline
-- [ ] Entity deduplication and merging
-- [ ] Relationship update triggers on content modification
-
-### Infrastructure
-- [ ] Scheduled sync jobs (cron)
-- [ ] Change detection and notification
-- [ ] Database maintenance and optimization
-
-See [docs/data_pipeline.md](docs/data_pipeline.md) for detailed implementation plans.
-
-See [docs/knowledge_graph.md](docs/knowledge_graph.md) for options on evolving to a full knowledge graph.
-
-## Contributing
-
-Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+- [docs/operations.md](docs/operations.md) -- Production deployment, cron setup, maintenance
+- [docs/integration.md](docs/integration.md) -- MCP server integration and bot deployment
+- [docs/search.md](docs/search.md) -- Search capabilities and query patterns
+- [docs/crawlers.md](docs/crawlers.md) -- Content crawlers (wiki, planet, wordpress)
+- [docs/schema.md](docs/schema.md) -- Database schema reference
+- [docs/data_pipeline.md](docs/data_pipeline.md) -- Data processing pipeline
+- [docs/entities.md](docs/entities.md) -- Entity extraction and knowledge graph
+- [docs/wordpress_integration.md](docs/wordpress_integration.md) -- WordPress source details
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+GNU General Public License v3.0 -- see [LICENSE](LICENSE).

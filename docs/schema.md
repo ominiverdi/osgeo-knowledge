@@ -18,14 +18,14 @@ The database uses PostgreSQL with the following extensions:
 
 ### pages
 
-Stores page metadata from source systems.  ** Note : is this current?
+Stores page metadata from source systems.
 
 | Column | Type | Description |
 |--------|------|-------------|
 | id | SERIAL | Primary key |
 | title | TEXT | Page title |
 | url | TEXT | Source URL |
-| source_type | TEXT | 'wiki', 'wordpress_page', 'wordpress_post' |
+| source_type | TEXT | 'wiki', 'planet_post', 'wordpress_page' |
 | last_modified | TIMESTAMP | Last modification time at source |
 | created_at | TIMESTAMP | When record was created |
 
@@ -105,7 +105,7 @@ Tracks source page sync status and stores latest content.
 | Column | Type | Description |
 |--------|------|-------------|
 | id | SERIAL | Primary key |
-| source_type | TEXT | 'wiki', 'wordpress_page', 'wordpress_post' |
+| source_type | TEXT | 'wiki', 'planet_post', 'wordpress_page' |
 | source_id | INTEGER | Page ID from source system |
 | title | TEXT | Page title |
 | url | TEXT | Page URL |
@@ -124,15 +124,19 @@ Queue for async processing tasks.
 | Column | Type | Description |
 |--------|------|-------------|
 | id | SERIAL | Primary key |
+| page_id | INTEGER | Foreign key to pages |
 | source_page_id | INTEGER | Foreign key to source_pages |
-| page_id | INTEGER | Foreign key to pages (optional) |
 | task_type | TEXT | 'chunks', 'extensions', 'entities' |
-| priority | INTEGER | Higher = more urgent |
-| status | TEXT | 'pending', 'processing', 'done', 'failed' |
-| claimed_at | TIMESTAMP | When a worker claimed this task |
+| priority | INTEGER | Higher = more urgent (default 0) |
+| created_at | TIMESTAMP | When task was queued |
+| started_at | TIMESTAMP | When a worker claimed this task |
 | completed_at | TIMESTAMP | When processing completed |
-| worker_id | TEXT | Identifier of processing worker |
+| status | TEXT | 'pending', 'processing', 'done', 'failed' |
 | error_message | TEXT | Error details if failed |
+| attempts | INTEGER | Number of processing attempts (default 0) |
+| max_attempts | INTEGER | Maximum retry attempts (default 3) |
+
+Unique constraint on `(page_id, task_type, status)` prevents duplicate pending tasks for the same page and task type.
 
 ### sync_log
 
@@ -142,7 +146,7 @@ Tracks sync operations.
 |--------|------|-------------|
 | id | SERIAL | Primary key |
 | sync_type | TEXT | 'incremental', 'full' |
-| source_type | TEXT | 'wiki', 'wordpress' |
+| source_type | TEXT | 'wiki', 'planet_post', 'wordpress_page' |
 | started_at | TIMESTAMP | When sync started |
 | completed_at | TIMESTAMP | When sync finished |
 | pages_checked | INTEGER | Number of pages checked |

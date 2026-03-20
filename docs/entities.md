@@ -67,8 +67,11 @@ Example queries the graph should support:
 ## Database Population
 
 **Scripts**:
-- `db/populate_entities.py` - Extract and store entities
-- `db/populate_user_entities.py` - Extract user/people entities
+- `db/process_entities.py` - Queue-based entity extraction and storage (standard approach)
+- `db/populate_entities.py` - Legacy script for batch entity extraction (still present)
+- `db/populate_user_entities.py` - Legacy script for user/people entities (still present)
+
+**Current scale**: ~20,000 entities, ~17,000 relationships.
 
 ## Quality Assurance
 
@@ -83,6 +86,17 @@ Example queries the graph should support:
 - Check relationship consistency
 - Verify entity types
 - Flag uncertain extractions for review
+
+## MCP Tools
+
+Entity data is accessible through the MCP server (`osgeo_knowledge.servers.mcp`):
+
+- `search_entities(query, entity_type, limit)` -- fuzzy search with trigram similarity
+- `get_entity_relationships(entity_name, predicate, limit)` -- knowledge graph queries
+
+Entity types: person, project, organization, conference, meeting, location, topic, sprint, software, year
+
+Common predicates: member_of, contributes_to, located_in, happened_in, president_of, created_by, founded_by, sponsors
 
 ## Future Improvements
 

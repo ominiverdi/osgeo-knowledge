@@ -1,134 +1,214 @@
 # Search Capabilities
 
-This document describes the search features available in the OSGeo Wiki Database.
+This document describes the search features available in the OSGeo Knowledge Database.
 
-## Search Types
+## MCP Search Tools
 
-### Full-Text Search
+The primary interface for searching is through two MCP tools exposed by the chat assistant.
 
-PostgreSQL tsvector-based search for keyword matching. NOTE: broken
+### search_wiki
+
+Searches the `page_extensions` table, which contains LLM-generated summaries and extracted keywords for each page. Results are ranked using weighted full-text search across three tsvector columns:
+
+- `resume_tsv` -- summary text
+- `keywords_tsv` -- extracted keywords
+- `page_title_tsv` -- page title
+
+**Parameters**:
+- `query` (required) -- search terms, passed through `websearch_to_tsquery`
+- `source` -- filter by origin: `'wiki'`, `'planet'`, or `'wordpress'`
+- `date_from` / `date_to` -- date range filter in `YYYY-MM-DD` format
+- `limit` -- max results (default 10)
+
+Returns: page title, URL, summary, keywords, last updated date, and relevance rank.
+
+### search_content
+
+Searches the `page_chunks` table for raw crawled content. Returns matching text with `ts_headline` highlights around the query terms.
+
+**Parameters**:
+- `query` (required) -- search terms, passed through `websearch_to_tsquery`
+- `source` -- filter by origin: `'wiki'`, `'planet'`, or `'wordpress'`
+- `date_from` / `date_to` -- date range filter in `YYYY-MM-DD` format
+- `limit` -- max results (default 10)
+
+Returns: page title, URL, highlighted text snippet, chunk index, and relevance rank.
+
+---
+
+## Full-Text Search (SQL)
+
+The underlying search uses PostgreSQL full-text search with `websearch_to_tsquery`, which supports natural query syntax including quoted phrases, `OR`, and `-` for exclusion.
+
+### Tables
+
+**page_extensions** -- LLM summaries and keywords per page:
+- `resume_tsv`, `keywords_tsv`, `page_title_tsv` (tsvector columns for search)
+- `resume`, `keywords`, `page_title` (plain text)
+- `url`, `last_updated`
+
+**page_chunks** -- raw crawled content split into chunks:
+- `chunk_text` (plain text)
+- `tsv` (tsvector for search)
+- `page_id`, `chunk_index`
+
+**pages** -- crawled pages:
+- `id`, `title`, `url`, `last_crawled`
+
+### Weighted Ranking on page_extensions
+
+Title matches are weighted higher than content matches. The ranking combines all three tsvector columns with PostgreSQL weight labels:
 
 ```sql
-SELECT title, content, ts_rank(search_vector, query) AS rank
-FROM wiki_chunks, plainto_tsquery('english', 'FOSS4G conference') AS query
-WHERE search_vector @@ query
+SELECT page_title, url, resume, keywords, last_updated,
+       ts_rank(
+           setweight(page_title_tsv, 'A') ||
+           setweight(keywords_tsv, 'B') ||
+           setweight(resume_tsv, 'C'),
+           query
+       ) AS rank
+FROM page_extensions,
+     websearch_to_tsquery('english', 'FOSS4G conference') AS query
+WHERE (page_title_tsv || keywords_tsv || resume_tsv) @@ query
 ORDER BY rank DESC
 LIMIT 10;
 ```
 
-**Features**:
-- Stemming (matches "configure", "configuration", "configured")
-- Stop word removal
-- Ranking by relevance
-- Phrase matching with `phraseto_tsquery`
-
-### Fuzzy Search
-
-Trigram-based similarity search for typo tolerance.
+### Content Search on page_chunks
 
 ```sql
-SELECT title, similarity(title, 'QQGIS') AS sim
-FROM pages
-WHERE title % 'QQGIS'
-ORDER BY sim DESC;
-```
-
-### Semantic Search (Planned)
-
-Vector similarity search using embeddings.
-
-```sql
-SELECT title, content
-FROM wiki_chunks
-ORDER BY embedding <-> query_embedding
+SELECT p.title, p.url,
+       ts_headline('english', c.chunk_text, query,
+                   'StartSel=**, StopSel=**, MaxWords=60, MinWords=20') AS snippet,
+       ts_rank(c.tsv, query) AS rank
+FROM page_chunks c
+JOIN pages p ON p.id = c.page_id,
+     websearch_to_tsquery('english', 'spatial database') AS query
+WHERE c.tsv @@ query
+ORDER BY rank DESC
 LIMIT 10;
 ```
 
-### Graph Search
+### Features
 
-Traverse entity relationships.
+- Stemming (matches "configure", "configuration", "configured")
+- Stop word removal
+- Relevance ranking with `ts_rank`
+- Phrase matching via quoted strings in `websearch_to_tsquery`
+- Snippet generation with `ts_headline`
+
+---
+
+## Entity Search
+
+### Table
+
+**entities**:
+- `id`, `entity_name`, `entity_type`
+- `url`, `confidence`, `source_page_id`
+
+### Entity Types
+
+`person`, `project`, `organization`, `conference`, `meeting`, `location`, `topic`, `sprint`, `software`, `year`
+
+### Trigram Similarity (pg_trgm)
+
+Fuzzy matching for typo tolerance and partial name matches:
 
 ```sql
--- Find all contributors to a project
-SELECT e.name
-FROM wiki_entities e
-JOIN wiki_relationships r ON e.id = r.subject_id
-WHERE r.object_id = (SELECT id FROM wiki_entities WHERE name = 'GDAL')
+SELECT entity_name, entity_type, similarity(entity_name, 'QQGIS') AS sim
+FROM entities
+WHERE entity_name % 'QQGIS'
+ORDER BY sim DESC
+LIMIT 10;
+```
+
+### Exact Entity Lookup
+
+```sql
+SELECT entity_name, entity_type, url, confidence
+FROM entities
+WHERE entity_name ILIKE '%GDAL%'
+ORDER BY confidence DESC;
+```
+
+---
+
+## Relationship Queries
+
+### Table
+
+**entity_relationships**:
+- `id`, `subject_id`, `predicate`, `object_id`
+- `source_page_id`, `confidence`
+
+### Common Predicates
+
+`member_of`, `contributes_to`, `located_in`, `happened_in`, `president_of`, `created_by`, `founded_by`, `sponsors`
+
+### Example: Find Contributors to a Project
+
+```sql
+SELECT e.entity_name
+FROM entities e
+JOIN entity_relationships r ON e.id = r.subject_id
+WHERE r.object_id = (SELECT id FROM entities WHERE entity_name = 'GDAL')
   AND r.predicate = 'contributes_to';
 ```
 
-## Search Strategies
+### Example: Find All Relationships for a Person
 
-### Simple Query
-Direct keyword search against content.
-
-### Entity-Aware Query
-1. Identify entities in query
-2. Search entity table first
-3. Expand to related content
-
-### Hybrid Search (Planned)
-Combine full-text and semantic search results with weighted ranking.
-
-## Query Optimization
-
-### Indexing
-- GIN index on tsvector columns
-- GIN index for trigram operations
-- HNSW index for vector search (planned)
-
-### Query Analysis
-- `analysis/analyze_postgres_search.py` - Evaluate search quality
-- `analysis/benchmark_search.py` - Performance testing
-
-## Integration Examples
-
-### Basic Search Function
-
-```python
-def search(query: str, limit: int = 10):
-    sql = """
-        SELECT title, content, ts_rank(search_vector, query) AS rank
-        FROM wiki_chunks, plainto_tsquery('english', %s) AS query
-        WHERE search_vector @@ query
-        ORDER BY rank DESC
-        LIMIT %s
-    """
-    return execute(sql, [query, limit])
+```sql
+SELECT
+    subj.entity_name AS subject,
+    r.predicate,
+    obj.entity_name AS object,
+    r.confidence
+FROM entity_relationships r
+JOIN entities subj ON subj.id = r.subject_id
+JOIN entities obj ON obj.id = r.object_id
+WHERE subj.entity_name = 'Frank Warmerdam'
+   OR obj.entity_name = 'Frank Warmerdam'
+ORDER BY r.confidence DESC;
 ```
 
-### Entity + Content Search
+---
 
-```python
-def search_with_entities(query: str):
-    # 1. Check if query matches an entity
-    entity = find_entity(query)
-    if entity:
-        # 2. Get entity info + related content
-        return get_entity_context(entity)
-    else:
-        # 3. Fall back to content search
-        return search_content(query)
+## Source Filtering
+
+Sources are determined by URL pattern matching on the `pages` table:
+
+| Source    | URL Pattern                        |
+|-----------|------------------------------------|
+| wiki      | `https://wiki.osgeo.org/%`        |
+| wordpress | `https://%osgeo.org/%`            |
+| planet    | Everything else                    |
+
+When filtering by source in queries that use `page_extensions` or `page_chunks`, join through `pages` and apply a `WHERE` clause on `pages.url`:
+
+```sql
+-- Wiki pages only
+WHERE p.url LIKE 'https://wiki.osgeo.org/%'
+
+-- WordPress pages only
+WHERE p.url LIKE 'https://%osgeo.org/%'
+  AND p.url NOT LIKE 'https://wiki.osgeo.org/%'
+
+-- Planet pages (everything else)
+WHERE p.url NOT LIKE 'https://%osgeo.org/%'
 ```
 
-## Performance Considerations
+---
 
-- Use `LIMIT` to avoid large result sets
-- Consider `ts_headline` for snippet generation (expensive)
-- Cache frequent queries
-- Monitor slow query log
+## Indexing
 
-## Current Indexes (pages)
+- GIN indexes on all tsvector columns (`resume_tsv`, `keywords_tsv`, `page_title_tsv`, `tsv`)
+- GIN index for trigram operations on `entity_name`
+- B-tree indexes on foreign keys (`page_id`, `source_page_id`, `subject_id`, `object_id`)
 
-    "pages_pkey" PRIMARY KEY, btree (id)
-    "pages_url_unique" UNIQUE, btree (url)
-Referenced by:
-    TABLE "code_snippets" CONSTRAINT "code_snippets_page_id_fkey" FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE
-    TABLE "entities" CONSTRAINT "entities_source_page_id_fkey" FOREIGN KEY (source_page_id) REFERENCES pages(id)
-    TABLE "entity_relationships" CONSTRAINT "entity_relationships_source_page_id_fkey" FOREIGN KEY (source_page_id) REFERENCES pages(id)
-    TABLE "message_contexts" CONSTRAINT "message_contexts_page_id_fkey" FOREIGN KEY (page_id) REFERENCES pages(id)
-    TABLE "page_categories" CONSTRAINT "page_categories_page_id_fkey" FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE
-    TABLE "page_chunks" CONSTRAINT "page_chunks_page_id_fkey" FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE
-    TABLE "page_processing_errors" CONSTRAINT "page_processing_errors_page_id_fkey" FOREIGN KEY (page_id) REFERENCES pages(id)
-    TABLE "processing_queue" CONSTRAINT "processing_queue_page_id_fkey" FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE
+## Performance Notes
 
+- Use `LIMIT` to cap result sets
+- `ts_headline` is expensive; use it only for display, not filtering
+- `websearch_to_tsquery` is preferred over `plainto_tsquery` for user-facing input
+- Source filtering benefits from the B-tree index on `pages.url`
